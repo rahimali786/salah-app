@@ -443,6 +443,12 @@
 
   function saveOfflineCache() {
     if (!cachedTimings || !userCoords) return;
+    let tomorrowDate = null;
+    if (tomorrowTimings) {
+      const t = new Date();
+      t.setDate(t.getDate() + 1);
+      tomorrowDate = localDateString(t);
+    }
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify({
         timingsDate,
@@ -453,6 +459,8 @@
         school: currentSchool,
         lat: userCoords.lat,
         lon: userCoords.lon,
+        tomorrowTimings: tomorrowTimings || null,
+        tomorrowDate,
         cachedAt: new Date().toISOString()
       }));
     } catch (e) {}
@@ -466,6 +474,39 @@
     } catch (e) { return null; }
   }
 
+  function coordsClose(a, b) {
+    if (!a || !b) return false;
+    return Math.abs(a.lat - b.lat) < 0.01 && Math.abs(a.lon - b.lon) < 0.01;
+  }
+
+  function restoreTomorrowFromCache(cache) {
+    if (!cache?.tomorrowTimings || !cache.tomorrowDate) return null;
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    if (cache.tomorrowDate !== localDateString(t)) return null;
+    return cache.tomorrowTimings;
+  }
+
+  function getValidDayCache(lat, lon) {
+    const cache = loadOfflineCache();
+    if (!cache || !cache.timings) return null;
+    if (cache.timingsDate !== localDateString()) return null;
+    if (cache.method !== currentMethod || cache.school !== currentSchool) return null;
+    if (!coordsClose({ lat, lon }, { lat: cache.lat, lon: cache.lon })) return null;
+    return cache;
+  }
+
+  function applyDayCache(cache) {
+    cachedTimings = cache.timings;
+    timingsDate = cache.timingsDate;
+    dateInfo = cache.dateInfo;
+    timezoneLabel = cache.timezone || null;
+    tomorrowTimings = restoreTomorrowFromCache(cache);
+    isOfflineView = false;
+    qiblaBearing = bearingToQibla(userCoords.lat, userCoords.lon);
+    updateDateLine();
+  }
+
   function applyOfflineCache(cache) {
     userCoords = { lat: cache.lat, lon: cache.lon };
     cachedTimings = cache.timings;
@@ -474,7 +515,7 @@
     timezoneLabel = cache.timezone || null;
     currentMethod = cache.method ?? currentMethod;
     currentSchool = cache.school ?? currentSchool;
-    tomorrowTimings = null;
+    tomorrowTimings = restoreTomorrowFromCache(cache);
     isOfflineView = true;
     qiblaBearing = bearingToQibla(userCoords.lat, userCoords.lon);
     updateDateLine();
@@ -708,7 +749,21 @@
   async function fetchTomorrowTimings() {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = localDateString(tomorrow);
+    const cache = loadOfflineCache();
+    if (
+      cache?.tomorrowTimings &&
+      cache.tomorrowDate === tomorrowDate &&
+      cache.method === currentMethod &&
+      cache.school === currentSchool &&
+      userCoords &&
+      coordsClose(userCoords, { lat: cache.lat, lon: cache.lon })
+    ) {
+      return cache.tomorrowTimings;
+    }
     const data = await fetchDayData(userCoords.lat, userCoords.lon, currentMethod, currentSchool, tomorrow);
+    tomorrowTimings = data.timings;
+    saveOfflineCache();
     return data.timings;
   }
 
@@ -718,6 +773,19 @@
       app.innerHTML = `<div class="state-card"><p>Fetching today's times…</p></div>`;
     }
     try {
+      const dayCache = getValidDayCache(userCoords.lat, userCoords.lon);
+      if (dayCache) {
+        applyDayCache(dayCache);
+        render(cachedTimings);
+        setOfflineBanner(false);
+        startTicker();
+        startSecondTicker();
+        resetRefreshBtn();
+        await syncRemindersToSW();
+        await refreshPrayerState();
+        return;
+      }
+
       const data = await fetchDayData(userCoords.lat, userCoords.lon, currentMethod, currentSchool);
       cachedTimings = data.timings;
       dateInfo = data.dateInfo;

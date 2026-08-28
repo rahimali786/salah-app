@@ -12,7 +12,7 @@ A personal, ad-free prayer times and Qibla direction web app, built to replace a
 - **After Isha** — tomorrow's Fajr with a **Tomorrow** label and real countdown.
 - **Asr school** — Shafi or Hanafi; saved in localStorage.
 - **Optional Sunrise** — toggle to show Sunrise in today's list.
-- **Offline fallback** — last loaded times if AlAdhan is unreachable.
+- **Offline fallback** — last loaded times if AlAdhan is unreachable; same-day cache also skips repeat AlAdhan calls when date, method, Asr school, and location (~1 km) are unchanged.
 - **Auto-locate** — opens directly if location permission was already granted.
 - **Place label** — area from AlAdhan timezone metadata, with coordinates underneath.
 - **Pull to refresh** — pull down on the main screen to refresh location.
@@ -71,7 +71,7 @@ Reminders are scheduled from today's loaded times and update when you refresh lo
 
 - **Prayer times**: AlAdhan API with `method` and `school` parameters.
 - **Reminders**: a service worker (`sw.js`) schedules today's five prayers in IndexedDB and shows a notification at each time. Adhan audio plays via the open app; closed app gets the system notification sound until you tap to open.
-- **Offline**: last successful times cached in localStorage.
+- **Offline**: last successful times (and optional tomorrow Fajr) in localStorage — reused same day to avoid repeat AlAdhan calls until date, prefs, or ~1 km location change; also used when the API is unreachable.
 - **Preferences**: calculation method, Asr school, Sunrise, **Enable prayer reminders**, and **Play Adhan sound** — saved in localStorage.
 
 ## Tech

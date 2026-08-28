@@ -22,9 +22,16 @@ No AlAdhan reverse-geocode endpoint exists. Place label uses humanized `meta.tim
 
 ## Offline cache (`salah-offline-cache`)
 
-JSON: `timingsDate`, `timings`, `dateInfo`, `timezone`, `method`, `school`, `lat`, `lon`, `cachedAt`.
+JSON: `timingsDate`, `timings`, `dateInfo`, `timezone`, `method`, `school`, `lat`, `lon`, `tomorrowTimings`, `tomorrowDate`, `cachedAt`.
 
-Saved on successful fetch. On network failure, load cache and show banner: "Offline — showing saved times from {date}". If cache date ≠ today, still show with same banner (stale). Location in cache is last session only for offline Qibla/times — documented in README privacy section.
+**Roles**
+
+1. **Same-day online reuse** — if cache date is today, method/school match, and GPS is within ~1 km (`|Δlat|` and `|Δlon|` < 0.01), skip AlAdhan and apply the cache (no offline banner).
+2. **Offline fallback** — on network failure, load cache and show banner: "Offline — showing saved times from {date}". If cache date ≠ today, still show with same banner (stale).
+
+**Invalidate / refetch** when the calendar date rolls, calculation method or Asr school changes, or location moves past the ~1 km epsilon. After Isha, tomorrow’s timings are fetched once and stored; reused while `tomorrowDate` and prefs/coords still match.
+
+Location in cache is last session coords for offline Qibla/times — documented in README privacy section.
 
 ## Countdown
 
