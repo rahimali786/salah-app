@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Salah — Prayer Times &amp; Qibla</title>
+<style>
+  :root {
+    --bg: #12172A;
+    --bg-card: #1B2338;
+    --bg-card-raised: #232C45;
+    --gold: #C9A66B;
+    --gold-dim: #8A7449;
+    --text: #F1EDE2;
+    --text-muted: #8B93AC;
+    --teal: #4F8A82;
+    --rust: #B5583F;
+    --hairline: rgba(241,237,226,0.09);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body {
+    background-image:
+      radial-gradient(circle at 15% -5%, rgba(201,166,107,0.10), transparent 45%),
+      radial-gradient(circle at 100% 10%, rgba(79,138,130,0.10), transparent 40%);
+  }
+  .wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gold);
+    text-align: center;
+    margin: 0 0 6px;
+  }
+  h1.brand {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 30px;
+    text-align: center;
+    margin: 0 0 28px;
+    letter-spacing: 0.02em;
+    font-weight: 400;
+  }
+  .brand em { color: var(--gold); font-style: normal; }
+
+  /* ---- state screens ---- */
+  .state-card {
+    background: var(--bg-card);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    padding: 36px 24px;
+    text-align: center;
+  }
+  .state-card p { color: var(--text-muted); line-height: 1.55; margin: 10px 0 22px; font-size: 14.5px; }
+  .btn {
+    appearance: none;
+    border: none;
+    background: var(--gold);
+    color: #1B1508;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 13px 26px;
+    border-radius: 999px;
+    cursor: pointer;
+    letter-spacing: 0.01em;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--hairline);
+  }
+  .error-text { color: var(--rust); font-size: 13.5px; margin-top: 14px; }
+
+  /* ---- hero: next prayer ---- */
+  .hero {
+    position: relative;
+    background: linear-gradient(165deg, var(--bg-card-raised), var(--bg-card));
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 30px 24px 26px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .hero-star {
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 200px; height: 200px;
+    opacity: 0.06;
+  }
+  .hero-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-muted); margin: 0; }
+  .hero-name {
+    font-family: Georgia, serif;
+    font-size: 44px;
+    margin: 4px 0 2px;
+    color: var(--gold);
+    position: relative;
+  }
+  .hero-time { font-size: 17px; color: var(--text); margin: 0 0 2px; }
+  .hero-countdown { font-size: 13.5px; color: var(--text-muted); margin: 0; }
+  .hero-loc { font-size: 12px; color: var(--text-muted); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hairline); display: flex; justify-content: space-between; align-items: center; }
+  .hero-loc button {
+    background: none; border: none; color: var(--gold); font-size: 12px; cursor: pointer; padding: 0;
+  }
+
+  /* ---- today list ---- */
+  .list-card {
+    background: var(--bg-card);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 6px 6px;
+    margin-bottom: 16px;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 13px 16px;
+    border-radius: 12px;
+  }
+  .row.active { background: rgba(201,166,107,0.12); }
+  .row-name { font-size: 15px; }
+  .row-name .arabic { color: var(--text-muted); font-size: 12.5px; margin-left: 6px; }
+  .row-time { font-size: 15px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .row.active .row-time { color: var(--gold); font-weight: 600; }
+  .row.past .row-name, .row.past .row-time { color: var(--text-muted); opacity: 0.5; }
+
+  /* ---- qibla ---- */
+  .qibla-card {
+    background: var(--bg-card);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 24px 20px 26px;
+    text-align: center;
+  }
+  .qibla-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-muted); margin: 0 0 18px; }
+  .compass-frame { position: relative; width: 220px; height: 220px; margin: 0 auto 16px; }
+  .compass-ring {
+    width: 100%; height: 100%;
+    border-radius: 50%;
+    border: 1px solid var(--hairline);
+    background: radial-gradient(circle at 50% 50%, var(--bg-card-raised), var(--bg-card) 72%);
+    position: relative;
+  }
+  .compass-tick { position: absolute; left: 50%; top: 50%; width: 1px; height: 108px; background: var(--hairline); transform-origin: top left; }
+  .compass-n {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--text-muted); letter-spacing: 0.08em;
+  }
+  .needle {
+    position: absolute; left: 50%; top: 50%;
+    width: 0; height: 0;
+    transform-origin: 0 0;
+  }
+  .needle svg { position: absolute; left: -22px; top: -92px; width: 44px; height: 92px; }
+  .compass-center {
+    position: absolute; left: 50%; top: 50%; width: 14px; height: 14px;
+    margin: -7px 0 0 -7px; border-radius: 50%; background: var(--gold);
+    box-shadow: 0 0 0 4px var(--bg-card);
+  }
+  .qibla-deg { font-family: Georgia, serif; font-size: 22px; color: var(--gold); margin: 4px 0 2px; }
+  .qibla-sub { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .qibla-permission { margin-top: 16px; }
+
+  .settings-row {
+    display: flex; justify-content: center; gap: 8px; margin-top: 18px;
+  }
+  select {
+    background: var(--bg-card-raised);
+    color: var(--text);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+  }
+
+  footer { text-align: center; margin-top: 28px; font-size: 11.5px; color: var(--text-muted); opacity: 0.7; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Prayer times, on demand</p>
+  <h1 class="brand">Sal<em>a</em>h</h1>
+
+  <div id="app">
+    <div class="state-card" id="start-card">
+      <p>Uses your phone's actual location, right now — no account, no ads.</p>
+      <button class="btn" id="locate-btn">Find my location</button>
+      <div id="start-error"></div>
+    </div>
+  </div>
+
+  <footer>Prayer times via AlAdhan · Qibla calculated from your GPS position</footer>
+</div>
+
+<script>
+(function() {
+  const KAABA_LAT = 21.4225;
+  const KAABA_LON = 39.8262;
+  const PRAYERS = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"];
+  const ARABIC = { Fajr: "الفجر", Dhuhr: "الظهر", Asr: "العصر", Maghrib: "المغرب", Isha: "العشاء" };
+
+  const app = document.getElementById('app');
+  let currentMethod = 2; // ISNA default
+  let userCoords = null;
+  let qiblaBearing = null;
+  let orientationActive = false;
+
+  // ---- persisted preference (calculation method) ----
+  async function loadMethodPref() {
+    try {
+      if (window.storage) {
+        const res = await window.storage.get('calc-method', false);
+        if (res && res.value) currentMethod = parseInt(res.value, 10);
+      }
+    } catch (e) { /* no saved pref yet, fine */ }
+  }
+  async function saveMethodPref(val) {
+    try { if (window.storage) await window.storage.set('calc-method', String(val), false); } catch (e) {}
+  }
+
+  function bearingToQibla(lat, lon) {
+    const toRad = d => d * Math.PI / 180;
+    const toDeg = r => r * 180 / Math.PI;
+    const lat1 = toRad(lat), lat2 = toRad(KAABA_LAT);
+    const dLon = toRad(KAABA_LON - lon);
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+
+  function fmtTime(t) {
+    // API gives "HH:MM" (24h) sometimes with suffix; convert to 12h display
+    const clean = t.split(' ')[0];
+    const [h, m] = clean.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = ((h + 11) % 12) + 1;
+    return { display: `${h12}:${String(m).padStart(2,'0')} ${period}`, hours: h, minutes: m };
+  }
+
+  function renderError(targetId, msg) {
+    document.getElementById(targetId).innerHTML =
+      `<p class="error-text">${msg}</p>`;
+  }
+
+  async function locate() {
+    const btn = document.getElementById('locate-btn');
+    btn.textContent = 'Locating…';
+    btn.disabled = true;
+    document.getElementById('start-error').innerHTML = '';
+
+    if (!navigator.geolocation) {
+      renderError('start-error', "This browser doesn't support location access. Try opening this page in your phone's browser instead.");
+      btn.textContent = 'Find my location';
+      btn.disabled = false;
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        userCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        await loadMethodPref();
+        loadAndRender();
+      },
+      (err) => {
+        let msg = "Couldn't get your location.";
+        if (err.code === err.PERMISSION_DENIED) {
+          msg = "Location access was denied. Enable location for this page in your browser settings, then try again.";
+        } else if (err.code === err.TIMEOUT) {
+          msg = "Location lookup timed out. Try again — GPS can be slow indoors.";
+        }
+        renderError('start-error', msg);
+        btn.textContent = 'Find my location';
+        btn.disabled = false;
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    );
+  }
+
+  async function fetchTimings(lat, lon, method) {
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    const url = `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}?latitude=${lat}&longitude=${lon}&method=${method}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('network');
+    const data = await res.json();
+    if (data.code !== 200) throw new Error('api');
+    return data.data.timings;
+  }
+
+  async function loadAndRender() {
+    app.innerHTML = `<div class="state-card"><p>Fetching today's times…</p></div>`;
+    try {
+      const timings = await fetchTimings(userCoords.lat, userCoords.lon, currentMethod);
+      qiblaBearing = bearingToQibla(userCoords.lat, userCoords.lon);
+      render(timings);
+    } catch (e) {
+      app.innerHTML = `<div class="state-card">
+        <p>Couldn't reach the prayer times service. Check your connection and try again.</p>
+        <button class="btn" id="retry-btn">Retry</button>
+      </div>`;
+      document.getElementById('retry-btn').onclick = loadAndRender;
+    }
+  }
+
+  function computeNext(timings) {
+    const now = new Date();
+    let next = null, nextMinutes = Infinity;
+    const parsed = {};
+    PRAYERS.forEach(p => {
+      const f = fmtTime(timings[p]);
+      parsed[p] = f;
+      const pDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), f.hours, f.minutes);
+      const diffMin = (pDate - now) / 60000;
+      if (diffMin >= 0 && diffMin < nextMinutes) { nextMinutes = diffMin; next = p; }
+    });
+    if (!next) { next = PRAYERS[0]; nextMinutes = null; } // all passed -> Fajr tomorrow
+    return { next, nextMinutes, parsed };
+  }
+
+  function starSVG() {
+    return `<svg class="hero-star" viewBox="0 0 100 100"><path fill="#C9A66B" d="M50 2 L61 39 L98 39 L68 61 L79 98 L50 75 L21 98 L32 61 L2 39 L39 39 Z"/></svg>`;
+  }
+
+  function render(timings) {
+    const { next, nextMinutes, parsed } = computeNext(timings);
+
+    let countdownText = '';
+    if (nextMinutes !== null) {
+      const h = Math.floor(nextMinutes / 60), m = Math.round(nextMinutes % 60);
+      countdownText = h > 0 ? `in ${h}h ${m}m` : `in ${m}m`;
+    } else {
+      countdownText = 'tomorrow';
+    }
+
+    let rowsHTML = '';
+    const now = new Date();
+    PRAYERS.forEach(p => {
+      const f = parsed[p];
+      const pDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), f.hours, f.minutes);
+      const isActive = p === next;
+      const isPast = pDate < now && !isActive;
+      rowsHTML += `<div class="row ${isActive ? 'active' : ''} ${isPast ? 'past' : ''}">
+        <div class="row-name">${p}<span class="arabic">${ARABIC[p]}</span></div>
+        <div class="row-time">${f.display}</div>
+      </div>`;
+    });
+
+    app.innerHTML = `
+      <div class="hero">
+        ${starSVG()}
+        <p class="hero-label">Next prayer</p>
+        <div class="hero-name">${next}</div>
+        <p class="hero-time">${parsed[next].display}</p>
+        <p class="hero-countdown">${countdownText}</p>
+        <div class="hero-loc">
+          <span>${userCoords.lat.toFixed(3)}, ${userCoords.lon.toFixed(3)}</span>
+          <button id="refresh-loc">Refresh location</button>
+        </div>
+      </div>
+
+      <div class="list-card">${rowsHTML}</div>
+
+      <div class="qibla-card">
+        <p class="qibla-title">Qibla direction</p>
+        <div class="compass-frame" id="compass-frame">
+          <div class="compass-ring">
+            <div class="compass-n">N</div>
+          </div>
+          <div class="needle" id="needle">
+            <svg viewBox="0 0 44 92"><path d="M22 0 L34 66 L22 54 L10 66 Z" fill="#C9A66B"/></svg>
+          </div>
+          <div class="compass-center"></div>
+        </div>
+        <p class="qibla-deg">${Math.round(qiblaBearing)}°</p>
+        <p class="qibla-sub" id="qibla-sub">from true north — tap below to enable your phone's compass</p>
+        <div class="qibla-permission">
+          <button class="btn secondary" id="enable-compass">Enable live compass</button>
+        </div>
+        <div class="settings-row">
+          <select id="method-select"></select>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('refresh-loc').onclick = locate;
+    document.getElementById('enable-compass').onclick = enableCompass;
+    setupMethodSelect();
+  }
+
+  function setupMethodSelect() {
+    const methods = [
+      [2, "ISNA (North America)"],
+      [3, "Muslim World League"],
+      [4, "Umm al-Qura (Makkah)"],
+      [1, "Karachi"],
+      [5, "Egyptian Authority"]
+    ];
+    const sel = document.getElementById('method-select');
+    sel.innerHTML = methods.map(([id, label]) =>
+      `<option value="${id}" ${id === currentMethod ? 'selected' : ''}>${label}</option>`).join('');
+    sel.onchange = async () => {
+      currentMethod = parseInt(sel.value, 10);
+      await saveMethodPref(currentMethod);
+      loadAndRender();
+    };
+  }
+
+  function rotateNeedle(headingRelativeToDevice) {
+    const needle = document.getElementById('needle');
+    if (needle) needle.style.transform = `rotate(${headingRelativeToDevice}deg)`;
+  }
+
+  function handleOrientation(event) {
+    let compassHeading;
+    if (typeof event.webkitCompassHeading === 'number') {
+      compassHeading = event.webkitCompassHeading; // iOS: 0 = North, clockwise
+    } else if (event.absolute && event.alpha !== null) {
+      compassHeading = (360 - event.alpha) % 360; // Android absolute orientation approx
+    } else {
+      return; // no usable heading
+    }
+    const relative = (qiblaBearing - compassHeading + 360) % 360;
+    rotateNeedle(relative);
+    const sub = document.getElementById('qibla-sub');
+    if (sub) sub.textContent = 'point the top of your phone toward the gold arrow';
+  }
+
+  async function enableCompass() {
+    const btn = document.getElementById('enable-compass');
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm !== 'granted') {
+          document.getElementById('qibla-sub').textContent = 'Compass permission denied — arrow shows direction from true north instead.';
+          return;
+        }
+      }
+      window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+      window.addEventListener('deviceorientation', handleOrientation, true);
+      orientationActive = true;
+      btn.textContent = 'Compass enabled';
+      btn.disabled = true;
+    } catch (e) {
+      document.getElementById('qibla-sub').textContent = "Couldn't access the compass on this device. Arrow shows direction from true north.";
+    }
+  }
+
+  document.getElementById('locate-btn').onclick = locate;
+})();
+</script>
+</body>
+</html>
