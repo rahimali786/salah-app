@@ -6,9 +6,9 @@ Service-worker-based local notifications at exact prayer time for all five praye
 
 ## Scheduling
 
-- After successful times fetch, page sends `SCHEDULE` to SW with today's five `fireAt` timestamps (ms).
-- SW stores in IndexedDB and sets `setTimeout` per alarm (backup: 60s poll).
-- Re-schedule on: new day, location/method/school change, reminder toggle.
+- After successful times fetch, page sends `SCHEDULE` to SW with today's five `fireAt` timestamps (ms) — all five prayers, including those already passed today (for missed-alarm recovery).
+- SW stores in IndexedDB and sets `setTimeout` per alarm (backup: 60s poll). Resync preserves `fired` flags so already-notified prayers are not repeated.
+- Re-schedule on: new day, location/method/school change, reminder toggle, app wake (`syncRemindersToSW` + `CHECK_NOW`).
 
 ## Adhan (hybrid)
 

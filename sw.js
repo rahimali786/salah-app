@@ -6,6 +6,20 @@ const CHECK_MS = 60000;
 let checkInterval = null;
 const pendingTimeouts = [];
 
+function todayDateString() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getAlarmDate(id) {
+  const parts = String(id).split('-');
+  if (parts.length < 4) return null;
+  return parts.slice(0, 3).join('-');
+}
+
 function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -84,20 +98,27 @@ async function fireAlarm(alarm) {
   const prefs = alarm.prefs || {};
   if (!prefs.enabled) return;
 
-  await markFired(alarm.id);
+  const alarmDate = getAlarmDate(alarm.id);
+  if (alarmDate && alarmDate !== todayDateString()) return;
 
   const title = `Time for ${alarm.prayer}`;
   const body = alarm.prayer === 'Fajr' ? 'Fajr has started' : `${alarm.prayer} prayer time`;
 
-  await self.registration.showNotification(title, {
-    body,
-    tag: `salah-${alarm.id}`,
-    renotify: true,
-    icon: 'icons/icon-192.png',
-    badge: 'icons/icon-192.png',
-    silent: false,
-    data: { prayer: alarm.prayer, url: './' }
-  });
+  try {
+    await self.registration.showNotification(title, {
+      body,
+      tag: `salah-${alarm.id}`,
+      renotify: true,
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
+      silent: false,
+      data: { prayer: alarm.prayer, url: './' }
+    });
+  } catch (e) {
+    return;
+  }
+
+  await markFired(alarm.id);
 
   if (prefs.playAdhan) {
     await playAdhanOnClients(alarm.id);
@@ -106,8 +127,11 @@ async function fireAlarm(alarm) {
 
 async function checkAlarms() {
   const now = Date.now();
+  const today = todayDateString();
   const alarms = await getPendingAlarms();
   for (const alarm of alarms) {
+    const alarmDate = getAlarmDate(alarm.id);
+    if (alarmDate && alarmDate !== today) continue;
     if (!alarm.fired && alarm.fireAt <= now) {
       await fireAlarm(alarm);
     }
@@ -117,8 +141,11 @@ async function checkAlarms() {
 function scheduleTimeouts(alarms) {
   clearTimeouts();
   const now = Date.now();
+  const today = todayDateString();
   alarms.forEach((alarm) => {
     if (alarm.fired) return;
+    const alarmDate = getAlarmDate(alarm.id);
+    if (alarmDate && alarmDate !== today) return;
     const delay = alarm.fireAt - now;
     if (delay > 0 && delay < 86400000) {
       const tid = setTimeout(() => fireAlarm(alarm), delay);
@@ -129,6 +156,8 @@ function scheduleTimeouts(alarms) {
 
 async function applySchedule(payload) {
   clearTimeouts();
+  const existing = await getPendingAlarms();
+  const firedMap = new Map(existing.map((a) => [a.id, a.fired]));
   await clearAlarms();
 
   if (!payload || !payload.enabled || !payload.alarms || !payload.alarms.length) {
@@ -136,13 +165,16 @@ async function applySchedule(payload) {
   }
 
   const prefs = { enabled: payload.enabled, playAdhan: payload.playAdhan };
-  const rows = payload.alarms.map((a) => ({
-    id: `${payload.date}-${a.prayer}`,
-    prayer: a.prayer,
-    fireAt: a.fireAt,
-    fired: false,
-    prefs
-  }));
+  const rows = payload.alarms.map((a) => {
+    const id = `${payload.date}-${a.prayer}`;
+    return {
+      id,
+      prayer: a.prayer,
+      fireAt: a.fireAt,
+      fired: firedMap.get(id) || false,
+      prefs
+    };
+  });
 
   await putAlarms(rows);
   scheduleTimeouts(rows);

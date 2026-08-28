@@ -507,13 +507,12 @@
 
   function buildAlarmPayload() {
     if (!cachedTimings || !timingsDate || !remindersEnabled) return null;
-    const now = Date.now();
     const today = new Date();
     const alarms = PRAYERS.map((p) => {
       const f = fmtTime(cachedTimings[p]);
       const fireAt = new Date(today.getFullYear(), today.getMonth(), today.getDate(), f.hours, f.minutes).getTime();
       return { prayer: p, fireAt };
-    }).filter((a) => a.fireAt > now);
+    });
     return {
       enabled: remindersEnabled,
       playAdhan: playAdhanSound,
@@ -534,6 +533,7 @@
       } else {
         sw.postMessage({ type: 'SCHEDULE', payload });
       }
+      sw.postMessage({ type: 'CHECK_NOW' });
     } catch (e) {}
   }
 
@@ -645,7 +645,7 @@
         timingsDate = null;
         loadAndRender();
       },
-      (err) => {
+      async (err) => {
         if (silent) {
           const cache = loadOfflineCache();
           if (cache) {
@@ -655,7 +655,8 @@
             setOfflineBanner(true, `Offline — showing saved times from ${readable}`);
             startTicker();
             startSecondTicker();
-            refreshPrayerState();
+            await refreshPrayerState();
+            await syncRemindersToSW();
             resetRefreshBtn();
             if (startBtn) { startBtn.textContent = 'Find my location'; startBtn.disabled = false; }
             return;
@@ -943,9 +944,10 @@
 
   function onWake() {
     if (wakeDebounce) clearTimeout(wakeDebounce);
-    wakeDebounce = setTimeout(() => {
+    wakeDebounce = setTimeout(async () => {
       wakeDebounce = null;
-      refreshPrayerState();
+      await refreshPrayerState();
+      if (remindersEnabled) await syncRemindersToSW();
       if (document.visibilityState === 'visible') {
         startTicker();
         startSecondTicker();
