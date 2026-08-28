@@ -1,0 +1,204 @@
+const DB_NAME = 'salah-reminders';
+const DB_VERSION = 1;
+const STORE = 'alarms';
+const CHECK_MS = 60000;
+
+let checkInterval = null;
+const pendingTimeouts = [];
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => reject(req.error);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+  });
+}
+
+async function clearAlarms() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function putAlarms(alarms) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    alarms.forEach((a) => store.put(a));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getPendingAlarms() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function markFired(id) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const req = store.get(id);
+    req.onsuccess = () => {
+      const row = req.result;
+      if (row) {
+        row.fired = true;
+        store.put(row);
+      }
+      resolve();
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function clearTimeouts() {
+  pendingTimeouts.forEach((id) => clearTimeout(id));
+  pendingTimeouts.length = 0;
+}
+
+async function playAdhanOnClients(alarmId) {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  clients.forEach((client) => client.postMessage({ type: 'PLAY_ADHAN', alarmId }));
+}
+
+async function fireAlarm(alarm) {
+  if (alarm.fired) return;
+  const prefs = alarm.prefs || {};
+  if (!prefs.enabled) return;
+
+  await markFired(alarm.id);
+
+  const title = `Time for ${alarm.prayer}`;
+  const body = alarm.prayer === 'Fajr' ? 'Fajr has started' : `${alarm.prayer} prayer time`;
+
+  await self.registration.showNotification(title, {
+    body,
+    tag: `salah-${alarm.id}`,
+    renotify: true,
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    silent: false,
+    data: { prayer: alarm.prayer, url: './' }
+  });
+
+  if (prefs.playAdhan) {
+    await playAdhanOnClients(alarm.id);
+  }
+}
+
+async function checkAlarms() {
+  const now = Date.now();
+  const alarms = await getPendingAlarms();
+  for (const alarm of alarms) {
+    if (!alarm.fired && alarm.fireAt <= now) {
+      await fireAlarm(alarm);
+    }
+  }
+}
+
+function scheduleTimeouts(alarms) {
+  clearTimeouts();
+  const now = Date.now();
+  alarms.forEach((alarm) => {
+    if (alarm.fired) return;
+    const delay = alarm.fireAt - now;
+    if (delay > 0 && delay < 86400000) {
+      const tid = setTimeout(() => fireAlarm(alarm), delay);
+      pendingTimeouts.push(tid);
+    }
+  });
+}
+
+async function applySchedule(payload) {
+  clearTimeouts();
+  await clearAlarms();
+
+  if (!payload || !payload.enabled || !payload.alarms || !payload.alarms.length) {
+    return;
+  }
+
+  const prefs = { enabled: payload.enabled, playAdhan: payload.playAdhan };
+  const rows = payload.alarms.map((a) => ({
+    id: `${payload.date}-${a.prayer}`,
+    prayer: a.prayer,
+    fireAt: a.fireAt,
+    fired: false,
+    prefs
+  }));
+
+  await putAlarms(rows);
+  scheduleTimeouts(rows);
+  await checkAlarms();
+}
+
+function startCheckLoop() {
+  if (checkInterval) return;
+  checkInterval = setInterval(checkAlarms, CHECK_MS);
+}
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    (async () => {
+      await self.clients.claim();
+      startCheckLoop();
+      const alarms = await getPendingAlarms();
+      scheduleTimeouts(alarms);
+      await checkAlarms();
+    })()
+  );
+});
+
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data.type === 'SCHEDULE') {
+    event.waitUntil(applySchedule(data.payload));
+  } else if (data.type === 'CLEAR') {
+    event.waitUntil(applySchedule({ enabled: false, alarms: [] }));
+  } else if (data.type === 'CHECK_NOW') {
+    event.waitUntil(checkAlarms());
+  }
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of clients) {
+        if ('focus' in client) {
+          await client.focus();
+          client.postMessage({ type: 'PLAY_ADHAN', alarmId: 'notification-tap' });
+          return;
+        }
+      }
+      if (self.clients.openWindow) {
+        const client = await self.clients.openWindow(event.notification.data?.url || './');
+        if (client) client.postMessage({ type: 'PLAY_ADHAN', alarmId: 'notification-tap' });
+      }
+    })()
+  );
+});
+
+startCheckLoop();

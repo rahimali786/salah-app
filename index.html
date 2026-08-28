@@ -230,6 +230,22 @@
   .qibla-sub { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.5; }
   .qibla-permission { margin-top: 16px; }
 
+  .reminders-card {
+    background: var(--bg-card);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 24px 20px 26px;
+    text-align: center;
+    margin-top: 16px;
+  }
+  .reminders-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 14px 0 0;
+  }
+  .reminders-actions { margin-top: 16px; }
+
   .top-settings {
     display: flex;
     flex-wrap: wrap;
@@ -307,11 +323,18 @@
   const SCHOOL_KEY = 'salah-asr-school';
   const SUNRISE_KEY = 'salah-show-sunrise';
   const CACHE_KEY = 'salah-offline-cache';
+  const REMINDERS_KEY = 'salah-reminders-enabled';
+  const ADHAN_KEY = 'salah-play-adhan';
+  const ADHAN_SRC = 'assets/adhan.mp3';
 
   const app = document.getElementById('app');
   let currentMethod = 2;
   let currentSchool = 0;
   let showSunrise = false;
+  let remindersEnabled = false;
+  let playAdhanSound = true;
+  let adhanAudio = null;
+  let lastAdhanAlarmId = '';
   let userCoords = null;
   let qiblaBearing = null;
   let orientationActive = false;
@@ -351,10 +374,27 @@
   function saveSunrisePref(val) {
     try { localStorage.setItem(SUNRISE_KEY, val ? '1' : '0'); } catch (e) {}
   }
+  function loadRemindersPref() {
+    try { remindersEnabled = localStorage.getItem(REMINDERS_KEY) === '1'; } catch (e) {}
+  }
+  function saveRemindersPref(val) {
+    try { localStorage.setItem(REMINDERS_KEY, val ? '1' : '0'); } catch (e) {}
+  }
+  function loadAdhanPref() {
+    try {
+      const v = localStorage.getItem(ADHAN_KEY);
+      if (v !== null) playAdhanSound = v === '1';
+    } catch (e) {}
+  }
+  function saveAdhanPref(val) {
+    try { localStorage.setItem(ADHAN_KEY, val ? '1' : '0'); } catch (e) {}
+  }
 
   loadMethodPref();
   loadSchoolPref();
   loadSunrisePref();
+  loadRemindersPref();
+  loadAdhanPref();
 
   function localDateString(d = new Date()) {
     const y = d.getFullYear();
@@ -454,6 +494,87 @@
     const list = ['Fajr'];
     if (showSunrise) list.push('Sunrise');
     return list.concat(['Dhuhr', 'Asr', 'Maghrib', 'Isha']);
+  }
+
+  async function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return null;
+    try {
+      return await navigator.serviceWorker.register('sw.js');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function buildAlarmPayload() {
+    if (!cachedTimings || !timingsDate || !remindersEnabled) return null;
+    const now = Date.now();
+    const today = new Date();
+    const alarms = PRAYERS.map((p) => {
+      const f = fmtTime(cachedTimings[p]);
+      const fireAt = new Date(today.getFullYear(), today.getMonth(), today.getDate(), f.hours, f.minutes).getTime();
+      return { prayer: p, fireAt };
+    }).filter((a) => a.fireAt > now);
+    return {
+      enabled: remindersEnabled,
+      playAdhan: playAdhanSound,
+      date: timingsDate,
+      alarms
+    };
+  }
+
+  async function syncRemindersToSW() {
+    if (!('serviceWorker' in navigator)) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sw = reg.active;
+      if (!sw) return;
+      const payload = buildAlarmPayload();
+      if (!payload) {
+        sw.postMessage({ type: 'CLEAR' });
+      } else {
+        sw.postMessage({ type: 'SCHEDULE', payload });
+      }
+    } catch (e) {}
+  }
+
+  function playAdhan(alarmId) {
+    if (!playAdhanSound) return;
+    if (alarmId && lastAdhanAlarmId === alarmId) return;
+    if (alarmId) lastAdhanAlarmId = alarmId;
+    try {
+      if (!adhanAudio) {
+        adhanAudio = new Audio(ADHAN_SRC);
+        adhanAudio.preload = 'auto';
+      }
+      adhanAudio.currentTime = 0;
+      adhanAudio.play().catch(() => {});
+    } catch (e) {}
+  }
+
+  async function enableReminders() {
+    if (!('Notification' in window)) return;
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return;
+    remindersEnabled = true;
+    saveRemindersPref(true);
+    await registerServiceWorker();
+    await syncRemindersToSW();
+    if (cachedTimings) render(cachedTimings);
+  }
+
+  async function disableReminders() {
+    remindersEnabled = false;
+    saveRemindersPref(false);
+    await syncRemindersToSW();
+    if (cachedTimings) render(cachedTimings);
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'PLAY_ADHAN') {
+        playAdhan(event.data.alarmId);
+      }
+    });
   }
 
   function bearingToQibla(lat, lon) {
@@ -610,6 +731,7 @@
       startTicker();
       startSecondTicker();
       resetRefreshBtn();
+      await syncRemindersToSW();
       await refreshPrayerState();
     } catch (e) {
       const cache = loadOfflineCache();
@@ -621,6 +743,7 @@
         startTicker();
         startSecondTicker();
         resetRefreshBtn();
+        await syncRemindersToSW();
         await refreshPrayerState();
         return;
       }
@@ -770,6 +893,7 @@
         setOfflineBanner(false);
         startTicker();
         startSecondTicker();
+        await syncRemindersToSW();
       } catch (e) {
         updateHeroAndList();
         updateHeroCountdown();
@@ -965,6 +1089,25 @@
           <button class="btn secondary" id="enable-compass" ${compassBtnDisabled}>${compassBtnText}</button>
         </div>
       </div>
+
+      <div class="reminders-card">
+        <p class="qibla-title">Prayer reminders</p>
+        ${remindersEnabled ? `
+          <label class="check-label" style="justify-content:center;margin-bottom:12px;">
+            <input type="checkbox" id="adhan-toggle" ${playAdhanSound ? 'checked' : ''}>
+            Play Adhan sound
+          </label>
+          <p class="reminders-note">Notifications at each prayer time. Adhan plays when Salah is open; tap the notification to open and hear Adhan. Works best from your home screen — on iPhone, reminders may be less reliable than native apps.</p>
+          <div class="reminders-actions">
+            <button class="btn secondary" id="disable-reminders">Turn off reminders</button>
+          </div>
+        ` : `
+          <p class="reminders-note">Get notified at Fajr, Dhuhr, Asr, Maghrib, and Isha. Add Salah to your home screen for the best experience.</p>
+          <div class="reminders-actions">
+            <button class="btn" id="enable-reminders">Enable prayer reminders</button>
+          </div>
+        `}
+      </div>
     `;
 
     document.getElementById('refresh-loc').onclick = () => locate();
@@ -973,7 +1116,25 @@
     setupMethodSelect();
     setupSchoolSelect();
     setupSunriseToggle();
+    setupRemindersUI();
     applyStaticCompass();
+  }
+
+  function setupRemindersUI() {
+    const enableBtn = document.getElementById('enable-reminders');
+    if (enableBtn) enableBtn.onclick = () => enableReminders();
+
+    const disableBtn = document.getElementById('disable-reminders');
+    if (disableBtn) disableBtn.onclick = () => disableReminders();
+
+    const adhanCb = document.getElementById('adhan-toggle');
+    if (adhanCb) {
+      adhanCb.onchange = async () => {
+        playAdhanSound = adhanCb.checked;
+        saveAdhanPref(playAdhanSound);
+        await syncRemindersToSW();
+      };
+    }
   }
 
   function setupMethodSelect() {
@@ -1071,6 +1232,7 @@
   if (locateBtn) locateBtn.onclick = () => locate();
 
   async function tryAutoLocate() {
+    if (remindersEnabled) await registerServiceWorker();
     if (!navigator.geolocation) return;
     try {
       if (navigator.permissions) {

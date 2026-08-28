@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#12172A"/>
+  <!-- compass ring -->
+  <circle cx="256" cy="256" r="168" fill="#C9A66B"/>
+  <circle cx="256" cy="256" r="138" fill="#12172A"/>
+  <!-- N tick -->
+  <rect x="248" y="78" width="16" height="28" fill="#C9A66B"/>
+  <!-- cardinal ticks -->
+  <line x1="256" y1="150" x2="256" y2="118" stroke="#C9A66B" stroke-width="6"/>
+  <line x1="362" y1="256" x2="394" y2="256" stroke="#C9A66B" stroke-width="6"/>
+  <line x1="256" y1="362" x2="256" y2="394" stroke="#C9A66B" stroke-width="6"/>
+  <line x1="150" y1="256" x2="118" y2="256" stroke="#C9A66B" stroke-width="6"/>
+  <!-- needle -->
+  <polygon points="256,158 268,244 256,236 244,244" fill="#C9A66B"/>
+  <polygon points="256,298 268,266 244,266" fill="#8A7449"/>
+  <!-- Kaaba -->
+  <rect x="212" y="222" width="88" height="88" fill="#C9A66B"/>
+  <rect x="212" y="255" width="88" height="12" fill="#4F8A82"/>
+  <circle cx="256" cy="256" r="8" fill="#C9A66B"/>
+</svg>
