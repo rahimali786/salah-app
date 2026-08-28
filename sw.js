@@ -158,20 +158,27 @@ async function applySchedule(payload) {
   clearTimeouts();
   const existing = await getPendingAlarms();
   const firedMap = new Map(existing.map((a) => [a.id, a.fired]));
+  const hadUnfired = new Set(existing.filter((a) => !a.fired).map((a) => a.id));
   await clearAlarms();
 
   if (!payload || !payload.enabled || !payload.alarms || !payload.alarms.length) {
     return;
   }
 
+  const now = Date.now();
   const prefs = { enabled: payload.enabled, playAdhan: payload.playAdhan };
   const rows = payload.alarms.map((a) => {
     const id = `${payload.date}-${a.prayer}`;
+    let fired = firedMap.get(id) || false;
+    // Past when first scheduled: skip notify. Prior unfired = genuine SW miss → allow catch-up.
+    if (!fired && a.fireAt <= now && !hadUnfired.has(id)) {
+      fired = true;
+    }
     return {
       id,
       prayer: a.prayer,
       fireAt: a.fireAt,
-      fired: firedMap.get(id) || false,
+      fired,
       prefs
     };
   });
