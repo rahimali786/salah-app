@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#12172A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <title>Salah</title>
 <style>
   :root {
@@ -100,13 +105,30 @@
     opacity: 0.06;
   }
   .hero-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-muted); margin: 0; }
+  .hero-name-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin: 4px 0 2px;
+  }
   .hero-name {
     font-family: Georgia, serif;
     font-size: 44px;
-    margin: 4px 0 2px;
+    margin: 0;
     color: var(--gold);
     position: relative;
   }
+  .hero-tomorrow {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--teal);
+    padding: 4px 10px;
+    border: 1px solid rgba(79,138,130,0.45);
+    border-radius: 999px;
+  }
+  .hero-tomorrow[hidden] { display: none; }
   .hero-time { font-size: 17px; color: var(--text); margin: 0 0 2px; }
   .hero-countdown { font-size: 13.5px; color: var(--text-muted); margin: 0; }
   .hero-loc { font-size: 12px; color: var(--text-muted); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hairline); display: flex; justify-content: space-between; align-items: center; }
@@ -224,24 +246,42 @@
   const KAABA_LON = 39.8262;
   const PRAYERS = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"];
   const ARABIC = { Fajr: "الفجر", Dhuhr: "الظهر", Asr: "العصر", Maghrib: "المغرب", Isha: "العشاء" };
+  const METHOD_KEY = 'salah-calc-method';
 
   const app = document.getElementById('app');
   let currentMethod = 2; // ISNA default
   let userCoords = null;
   let qiblaBearing = null;
   let orientationActive = false;
+  let cachedTimings = null;
+  let timingsDate = null;
+  let tomorrowTimings = null;
+  let tickInterval = null;
+  let wakeDebounce = null;
 
-  // ---- persisted preference (calculation method) ----
-  async function loadMethodPref() {
+  function loadMethodPref() {
     try {
-      if (window.storage) {
-        const res = await window.storage.get('calc-method', false);
-        if (res && res.value) currentMethod = parseInt(res.value, 10);
-      }
-    } catch (e) { /* no saved pref yet, fine */ }
+      const v = localStorage.getItem(METHOD_KEY);
+      if (v) currentMethod = parseInt(v, 10);
+    } catch (e) { /* private mode / blocked */ }
   }
-  async function saveMethodPref(val) {
-    try { if (window.storage) await window.storage.set('calc-method', String(val), false); } catch (e) {}
+  function saveMethodPref(val) {
+    try { localStorage.setItem(METHOD_KEY, String(val)); } catch (e) {}
+  }
+  loadMethodPref();
+
+  function localDateString(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function formatCountdown(minutes) {
+    if (minutes === null || minutes < 0) return 'tomorrow';
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return h > 0 ? `in ${h}h ${m}m` : `in ${m}m`;
   }
 
   function bearingToQibla(lat, lon) {
@@ -269,22 +309,31 @@
   }
 
   async function locate() {
-    const btn = document.getElementById('locate-btn');
-    btn.textContent = 'Locating…';
-    btn.disabled = true;
-    document.getElementById('start-error').innerHTML = '';
+    const startBtn = document.getElementById('locate-btn');
+    const startError = document.getElementById('start-error');
+    if (startBtn) {
+      startBtn.textContent = 'Locating…';
+      startBtn.disabled = true;
+    }
+    if (startError) startError.innerHTML = '';
 
     if (!navigator.geolocation) {
-      renderError('start-error', "This browser doesn't support location access. Try opening this page in your phone's browser instead.");
-      btn.textContent = 'Find my location';
-      btn.disabled = false;
+      if (startError) {
+        renderError('start-error', "This browser doesn't support location access. Try opening this page in your phone's browser instead.");
+      }
+      if (startBtn) {
+        startBtn.textContent = 'Find my location';
+        startBtn.disabled = false;
+      }
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
+      (pos) => {
         userCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        await loadMethodPref();
+        tomorrowTimings = null;
+        cachedTimings = null;
+        timingsDate = null;
         loadAndRender();
       },
       (err) => {
@@ -294,19 +343,20 @@
         } else if (err.code === err.TIMEOUT) {
           msg = "Location lookup timed out. Try again — GPS can be slow indoors.";
         }
-        renderError('start-error', msg);
-        btn.textContent = 'Find my location';
-        btn.disabled = false;
+        if (startError) renderError('start-error', msg);
+        if (startBtn) {
+          startBtn.textContent = 'Find my location';
+          startBtn.disabled = false;
+        }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
     );
   }
 
-  async function fetchTimings(lat, lon, method) {
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy = today.getFullYear();
+  async function fetchTimings(lat, lon, method, date = new Date()) {
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
     const url = `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}?latitude=${lat}&longitude=${lon}&method=${method}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('network');
@@ -315,13 +365,28 @@
     return data.data.timings;
   }
 
+  async function fetchTomorrowTimings() {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return fetchTimings(userCoords.lat, userCoords.lon, currentMethod, tomorrow);
+  }
+
   async function loadAndRender() {
-    app.innerHTML = `<div class="state-card"><p>Fetching today's times…</p></div>`;
+    const hasMainUi = document.getElementById('hero-name');
+    if (!hasMainUi) {
+      app.innerHTML = `<div class="state-card"><p>Fetching today's times…</p></div>`;
+    }
     try {
       const timings = await fetchTimings(userCoords.lat, userCoords.lon, currentMethod);
+      cachedTimings = timings;
+      timingsDate = localDateString();
+      tomorrowTimings = null;
       qiblaBearing = bearingToQibla(userCoords.lat, userCoords.lon);
       render(timings);
+      startTicker();
+      await refreshPrayerState();
     } catch (e) {
+      stopTicker();
       app.innerHTML = `<div class="state-card">
         <p>Couldn't reach the prayer times service. Check your connection and try again.</p>
         <button class="btn" id="retry-btn">Retry</button>
@@ -341,37 +406,168 @@
       const diffMin = (pDate - now) / 60000;
       if (diffMin >= 0 && diffMin < nextMinutes) { nextMinutes = diffMin; next = p; }
     });
-    if (!next) { next = PRAYERS[0]; nextMinutes = null; } // all passed -> Fajr tomorrow
-    return { next, nextMinutes, parsed };
+    const allPassed = !next;
+    if (allPassed) {
+      next = 'Fajr';
+      nextMinutes = null;
+    }
+    return { next, nextMinutes, parsed, allPassed };
   }
+
+  function getHeroDisplay() {
+    const { next, nextMinutes, parsed, allPassed } = computeNext(cachedTimings);
+    if (!allPassed) {
+      return {
+        next,
+        timeDisplay: parsed[next].display,
+        countdownText: formatCountdown(nextMinutes),
+        showTomorrow: false
+      };
+    }
+    if (tomorrowTimings) {
+      const f = fmtTime(tomorrowTimings.Fajr);
+      const tomorrowDate = new Date();
+      tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+      tomorrowDate.setHours(f.hours, f.minutes, 0, 0);
+      const diffMin = (tomorrowDate - new Date()) / 60000;
+      return {
+        next: 'Fajr',
+        timeDisplay: f.display,
+        countdownText: formatCountdown(diffMin),
+        showTomorrow: true
+      };
+    }
+    return {
+      next: 'Fajr',
+      timeDisplay: '',
+      countdownText: 'tomorrow',
+      showTomorrow: true
+    };
+  }
+
+  function updateHeroAndList() {
+    if (!cachedTimings || !document.getElementById('hero-name')) return;
+
+    const hero = getHeroDisplay();
+    const heroName = document.getElementById('hero-name');
+    const heroTomorrow = document.getElementById('hero-tomorrow');
+    const heroTime = document.getElementById('hero-time');
+    const heroCountdown = document.getElementById('hero-countdown');
+
+    heroName.textContent = hero.next;
+    if (heroTomorrow) {
+      if (hero.showTomorrow) heroTomorrow.removeAttribute('hidden');
+      else heroTomorrow.setAttribute('hidden', '');
+    }
+    if (heroTime) {
+      heroTime.textContent = hero.timeDisplay;
+      heroTime.style.display = hero.timeDisplay ? '' : 'none';
+    }
+    if (heroCountdown) heroCountdown.textContent = hero.countdownText;
+
+    const now = new Date();
+    const { next, allPassed, parsed } = computeNext(cachedTimings);
+    PRAYERS.forEach(p => {
+      const row = document.getElementById('row-' + p.toLowerCase());
+      if (!row) return;
+      const f = parsed[p];
+      const pDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), f.hours, f.minutes);
+      const isActive = !allPassed && p === next;
+      const isPast = allPassed || (pDate < now && !isActive);
+      row.className = 'row' + (isActive ? ' active' : '') + (isPast ? ' past' : '');
+    });
+  }
+
+  async function refreshPrayerState() {
+    if (!userCoords || !cachedTimings) return;
+
+    const today = localDateString();
+    if (today !== timingsDate) {
+      tomorrowTimings = null;
+      try {
+        const timings = await fetchTimings(userCoords.lat, userCoords.lon, currentMethod);
+        cachedTimings = timings;
+        timingsDate = today;
+        qiblaBearing = bearingToQibla(userCoords.lat, userCoords.lon);
+        render(timings);
+        startTicker();
+      } catch (e) {
+        updateHeroAndList();
+        return;
+      }
+    }
+
+    const { allPassed } = computeNext(cachedTimings);
+    if (allPassed && !tomorrowTimings) {
+      try {
+        tomorrowTimings = await fetchTomorrowTimings();
+      } catch (e) { /* keep fallback hero */ }
+    }
+    updateHeroAndList();
+  }
+
+  function startTicker() {
+    stopTicker();
+    if (!cachedTimings) return;
+    tickInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshPrayerState();
+    }, 60000);
+  }
+
+  function stopTicker() {
+    if (tickInterval) {
+      clearInterval(tickInterval);
+      tickInterval = null;
+    }
+  }
+
+  function onWake() {
+    if (wakeDebounce) clearTimeout(wakeDebounce);
+    wakeDebounce = setTimeout(() => {
+      wakeDebounce = null;
+      refreshPrayerState();
+      if (document.visibilityState === 'visible') startTicker();
+    }, 300);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') onWake();
+    else stopTicker();
+  });
+  window.addEventListener('pageshow', onWake);
+  window.addEventListener('focus', onWake);
 
   function starSVG() {
     return `<svg class="hero-star" viewBox="0 0 100 100"><path fill="#C9A66B" d="M50 2 L61 39 L98 39 L68 61 L79 98 L50 75 L21 98 L32 61 L2 39 L39 39 Z"/></svg>`;
   }
 
   function render(timings) {
-    const { next, nextMinutes, parsed } = computeNext(timings);
-
-    let countdownText = '';
-    if (nextMinutes !== null) {
-      const h = Math.floor(nextMinutes / 60), m = Math.round(nextMinutes % 60);
-      countdownText = h > 0 ? `in ${h}h ${m}m` : `in ${m}m`;
-    } else {
-      countdownText = 'tomorrow';
-    }
+    const { next, nextMinutes, parsed, allPassed } = computeNext(timings);
+    const hero = allPassed
+      ? { next: 'Fajr', timeDisplay: '', countdownText: 'tomorrow', showTomorrow: true }
+      : {
+          next,
+          timeDisplay: parsed[next].display,
+          countdownText: formatCountdown(nextMinutes),
+          showTomorrow: false
+        };
 
     let rowsHTML = '';
     const now = new Date();
     PRAYERS.forEach(p => {
       const f = parsed[p];
       const pDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), f.hours, f.minutes);
-      const isActive = p === next;
-      const isPast = pDate < now && !isActive;
-      rowsHTML += `<div class="row ${isActive ? 'active' : ''} ${isPast ? 'past' : ''}">
+      const isActive = !allPassed && p === next;
+      const isPast = allPassed || (pDate < now && !isActive);
+      rowsHTML += `<div class="row ${isActive ? 'active' : ''} ${isPast ? 'past' : ''}" id="row-${p.toLowerCase()}" data-prayer="${p}">
         <div class="row-name">${p}<span class="arabic">${ARABIC[p]}</span></div>
         <div class="row-time">${f.display}</div>
       </div>`;
     });
+
+    const compassEnabled = orientationActive;
+    const compassBtnText = compassEnabled ? 'Compass enabled' : 'Enable live compass';
+    const compassBtnDisabled = compassEnabled ? 'disabled' : '';
 
     app.innerHTML = `
       <div class="top-settings">
@@ -382,9 +578,12 @@
       <div class="hero">
         ${starSVG()}
         <p class="hero-label">Next prayer</p>
-        <div class="hero-name">${next}</div>
-        <p class="hero-time">${parsed[next].display}</p>
-        <p class="hero-countdown">${countdownText}</p>
+        <div class="hero-name-wrap">
+          <div class="hero-name" id="hero-name">${hero.next}</div>
+          <span class="hero-tomorrow" id="hero-tomorrow" ${hero.showTomorrow ? '' : 'hidden'}>Tomorrow</span>
+        </div>
+        <p class="hero-time" id="hero-time" ${hero.timeDisplay ? '' : 'style="display:none"'}>${hero.timeDisplay}</p>
+        <p class="hero-countdown" id="hero-countdown">${hero.countdownText}</p>
         <div class="hero-loc">
           <span>${userCoords.lat.toFixed(3)}, ${userCoords.lon.toFixed(3)}</span>
           <button id="refresh-loc">Refresh location</button>
@@ -405,15 +604,16 @@
           <div class="compass-center"></div>
         </div>
         <p class="qibla-deg">${Math.round(qiblaBearing)}°</p>
-        <p class="qibla-sub" id="qibla-sub">from true north — tap below to enable your phone's compass</p>
+        <p class="qibla-sub" id="qibla-sub">${compassEnabled ? 'point the top of your phone toward the gold arrow' : "from true north — tap below to enable your phone's compass"}</p>
         <div class="qibla-permission">
-          <button class="btn secondary" id="enable-compass">Enable live compass</button>
+          <button class="btn secondary" id="enable-compass" ${compassBtnDisabled}>${compassBtnText}</button>
         </div>
       </div>
     `;
 
     document.getElementById('refresh-loc').onclick = locate;
-    document.getElementById('enable-compass').onclick = enableCompass;
+    const compassBtn = document.getElementById('enable-compass');
+    if (!compassEnabled) compassBtn.onclick = enableCompass;
     setupMethodSelect();
   }
 
@@ -428,9 +628,10 @@
     const sel = document.getElementById('method-select');
     sel.innerHTML = methods.map(([id, label]) =>
       `<option value="${id}" ${id === currentMethod ? 'selected' : ''}>${label}</option>`).join('');
-    sel.onchange = async () => {
+    sel.onchange = () => {
       currentMethod = parseInt(sel.value, 10);
-      await saveMethodPref(currentMethod);
+      saveMethodPref(currentMethod);
+      tomorrowTimings = null;
       loadAndRender();
     };
   }
