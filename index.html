@@ -173,8 +173,18 @@
   .qibla-sub { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.5; }
   .qibla-permission { margin-top: 16px; }
 
-  .settings-row {
-    display: flex; justify-content: center; gap: 8px; margin-top: 18px;
+  .top-settings {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: -8px 0 16px;
+  }
+  .top-settings label {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
   }
   select {
     background: var(--bg-card-raised);
@@ -364,6 +374,11 @@
     });
 
     app.innerHTML = `
+      <div class="top-settings">
+        <label for="method-select">Calculation method</label>
+        <select id="method-select"></select>
+      </div>
+
       <div class="hero">
         ${starSVG()}
         <p class="hero-label">Next prayer</p>
@@ -393,9 +408,6 @@
         <p class="qibla-sub" id="qibla-sub">from true north — tap below to enable your phone's compass</p>
         <div class="qibla-permission">
           <button class="btn secondary" id="enable-compass">Enable live compass</button>
-        </div>
-        <div class="settings-row">
-          <select id="method-select"></select>
         </div>
       </div>
     `;
