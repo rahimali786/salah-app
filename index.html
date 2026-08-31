@@ -82,6 +82,27 @@
   }
   .offline-banner[hidden] { display: none; }
 
+  .adhan-banner {
+    background: rgba(79, 138, 130, 0.2);
+    border: 1px solid rgba(79, 138, 130, 0.45);
+    color: var(--text);
+    text-align: center;
+    padding: 12px 16px;
+    font-size: 14px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    line-height: 1.4;
+  }
+  .adhan-banner[hidden] { display: none; }
+
+  .reminders-status {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 8px 0 0;
+    line-height: 1.4;
+  }
+
   .pull-hint {
     text-align: center;
     font-size: 11px;
@@ -335,6 +356,7 @@
   let remindersEnabled = false;
   let playAdhanSound = true;
   let adhanAudio = null;
+  let audioUnlocked = false;
   let lastAdhanAlarmId = '';
   let userCoords = null;
   let qiblaBearing = null;
@@ -348,6 +370,9 @@
   let tickInterval = null;
   let secondInterval = null;
   let wakeDebounce = null;
+  let lastWakeAt = 0;
+  const WAKE_DEBOUNCE_MS = 800;
+  const WAKE_COOLDOWN_MS = 2000;
   let touchStartY = 0;
   let pullDistance = 0;
 
@@ -547,42 +572,115 @@
     }
   }
 
-  function buildAlarmPayload() {
-    if (!cachedTimings || !timingsDate || !remindersEnabled) return null;
-    const today = new Date();
+  function buildAlarmPayloadForDate(timings, dateStr, baseDate) {
+    const d = baseDate || new Date();
     const alarms = PRAYERS.map((p) => {
-      const f = fmtTime(cachedTimings[p]);
-      const fireAt = new Date(today.getFullYear(), today.getMonth(), today.getDate(), f.hours, f.minutes).getTime();
+      const f = fmtTime(timings[p]);
+      const fireAt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), f.hours, f.minutes).getTime();
       return { prayer: p, fireAt };
     });
     return {
       enabled: remindersEnabled,
       playAdhan: playAdhanSound,
-      date: timingsDate,
+      date: dateStr,
       alarms
     };
   }
 
-  async function syncRemindersToSW() {
+  function buildAlarmPayload() {
+    if (!cachedTimings || !timingsDate || !remindersEnabled) return null;
+    return buildAlarmPayloadForDate(cachedTimings, timingsDate, new Date());
+  }
+
+  function buildTomorrowAlarmPayload() {
+    if (!tomorrowTimings || !remindersEnabled) return null;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const payload = buildAlarmPayloadForDate(tomorrowTimings, localDateString(tomorrow), tomorrow);
+    payload.merge = true;
+    return payload;
+  }
+
+  async function postToReminderSW(message) {
     if (!('serviceWorker' in navigator)) return;
     try {
       const reg = await navigator.serviceWorker.ready;
       const sw = reg.active;
       if (!sw) return;
-      const payload = buildAlarmPayload();
-      if (!payload) {
-        sw.postMessage({ type: 'CLEAR' });
-      } else {
-        sw.postMessage({ type: 'SCHEDULE', payload });
-      }
-      sw.postMessage({ type: 'CHECK_NOW' });
+      sw.postMessage(message);
     } catch (e) {}
   }
 
-  function playAdhan(alarmId) {
+  async function scheduleRemindersToSW() {
+    const payload = buildAlarmPayload();
+    if (!payload) {
+      await postToReminderSW({ type: 'CLEAR' });
+    } else {
+      await postToReminderSW({ type: 'SCHEDULE', payload });
+    }
+  }
+
+  async function scheduleTomorrowRemindersToSW() {
+    const payload = buildTomorrowAlarmPayload();
+    if (payload) await postToReminderSW({ type: 'SCHEDULE', payload });
+  }
+
+  async function sendTestNotification() {
+    await postToReminderSW({ type: 'TEST_NOTIFY' });
+  }
+
+  function notificationPermissionLabel() {
+    if (!('Notification' in window)) return 'Not supported on this browser';
+    if (Notification.permission === 'granted') return 'Allowed';
+    if (Notification.permission === 'denied') return 'Blocked — enable in phone Settings';
+    return 'Not yet asked';
+  }
+
+  function nextReminderLabel() {
+    if (!cachedTimings || !remindersEnabled) return '—';
+    const { next, parsed, allPassed } = computeNext(cachedTimings);
+    if (!allPassed) return `${next} at ${parsed[next].display}`;
+    if (tomorrowTimings) {
+      const f = fmtTime(tomorrowTimings.Fajr);
+      return `Tomorrow Fajr at ${f.display}`;
+    }
+    return 'After Isha — tomorrow Fajr';
+  }
+
+  async function unlockAdhanAudio() {
+    try {
+      if (!adhanAudio) {
+        adhanAudio = new Audio(ADHAN_SRC);
+        adhanAudio.preload = 'auto';
+      }
+      adhanAudio.volume = 0.01;
+      await adhanAudio.play();
+      adhanAudio.pause();
+      adhanAudio.currentTime = 0;
+      adhanAudio.volume = 1;
+      audioUnlocked = true;
+    } catch (e) {}
+  }
+
+  function showAdhanBanner(prayer) {
+    const el = document.getElementById('adhan-banner');
+    if (!el || !prayer) return;
+    const text = el.querySelector('.adhan-banner-text');
+    if (text) text.textContent = `Time for ${prayer} — Tap to hear Adhan`;
+    el.removeAttribute('hidden');
+  }
+
+  function hideAdhanBanner() {
+    const el = document.getElementById('adhan-banner');
+    if (el) el.setAttribute('hidden', '');
+  }
+
+  function playAdhan(alarmId, prayer) {
     if (!playAdhanSound) return;
-    if (alarmId && lastAdhanAlarmId === alarmId) return;
-    if (alarmId) lastAdhanAlarmId = alarmId;
+    if (prayer) showAdhanBanner(prayer);
+    const dedupe = alarmId && !String(alarmId).startsWith('banner') && !String(alarmId).startsWith('test');
+    if (dedupe && lastAdhanAlarmId === alarmId) return;
+    if (dedupe && alarmId) lastAdhanAlarmId = alarmId;
     try {
       if (!adhanAudio) {
         adhanAudio = new Audio(ADHAN_SRC);
@@ -593,6 +691,10 @@
     } catch (e) {}
   }
 
+  async function checkRemindersNow() {
+    await postToReminderSW({ type: 'CHECK_NOW' });
+  }
+
   async function enableReminders() {
     if (!('Notification' in window)) return;
     const perm = await Notification.requestPermission();
@@ -600,21 +702,25 @@
     remindersEnabled = true;
     saveRemindersPref(true);
     await registerServiceWorker();
-    await syncRemindersToSW();
+    await unlockAdhanAudio();
+    await scheduleRemindersToSW();
     if (cachedTimings) render(cachedTimings);
   }
 
   async function disableReminders() {
     remindersEnabled = false;
     saveRemindersPref(false);
-    await syncRemindersToSW();
+    await scheduleRemindersToSW();
     if (cachedTimings) render(cachedTimings);
   }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (event) => {
-      if (event.data?.type === 'PLAY_ADHAN') {
-        playAdhan(event.data.alarmId);
+      const data = event.data || {};
+      if (data.type === 'PLAY_ADHAN') {
+        playAdhan(data.alarmId, data.prayer);
+      } else if (data.type === 'SHOW_ADHAN_BANNER') {
+        if (playAdhanSound) showAdhanBanner(data.prayer);
       }
     });
   }
@@ -698,7 +804,7 @@
             startTicker();
             startSecondTicker();
             await refreshPrayerState();
-            await syncRemindersToSW();
+            await scheduleRemindersToSW();
             resetRefreshBtn();
             if (startBtn) { startBtn.textContent = 'Find my location'; startBtn.disabled = false; }
             return;
@@ -759,11 +865,14 @@
       userCoords &&
       coordsClose(userCoords, { lat: cache.lat, lon: cache.lon })
     ) {
+      tomorrowTimings = cache.tomorrowTimings;
+      if (remindersEnabled) await scheduleTomorrowRemindersToSW();
       return cache.tomorrowTimings;
     }
     const data = await fetchDayData(userCoords.lat, userCoords.lon, currentMethod, currentSchool, tomorrow);
     tomorrowTimings = data.timings;
     saveOfflineCache();
+    await scheduleTomorrowRemindersToSW();
     return data.timings;
   }
 
@@ -781,7 +890,7 @@
         startTicker();
         startSecondTicker();
         resetRefreshBtn();
-        await syncRemindersToSW();
+        await scheduleRemindersToSW();
         await refreshPrayerState();
         return;
       }
@@ -801,7 +910,7 @@
       startTicker();
       startSecondTicker();
       resetRefreshBtn();
-      await syncRemindersToSW();
+      await scheduleRemindersToSW();
       await refreshPrayerState();
     } catch (e) {
       const cache = loadOfflineCache();
@@ -813,7 +922,7 @@
         startTicker();
         startSecondTicker();
         resetRefreshBtn();
-        await syncRemindersToSW();
+        await scheduleRemindersToSW();
         await refreshPrayerState();
         return;
       }
@@ -963,7 +1072,7 @@
         setOfflineBanner(false);
         startTicker();
         startSecondTicker();
-        await syncRemindersToSW();
+        await scheduleRemindersToSW();
       } catch (e) {
         updateHeroAndList();
         updateHeroCountdown();
@@ -976,6 +1085,8 @@
       try {
         tomorrowTimings = await fetchTomorrowTimings();
       } catch (e) {}
+    } else if (allPassed && tomorrowTimings && remindersEnabled) {
+      await scheduleTomorrowRemindersToSW();
     }
     updateHeroAndList();
     updateHeroCountdown();
@@ -1015,13 +1126,16 @@
     if (wakeDebounce) clearTimeout(wakeDebounce);
     wakeDebounce = setTimeout(async () => {
       wakeDebounce = null;
+      const now = Date.now();
+      if (now - lastWakeAt < WAKE_COOLDOWN_MS) return;
+      lastWakeAt = now;
       await refreshPrayerState();
-      if (remindersEnabled) await syncRemindersToSW();
+      if (remindersEnabled) await checkRemindersNow();
       if (document.visibilityState === 'visible') {
         startTicker();
         startSecondTicker();
       }
-    }, 300);
+    }, WAKE_DEBOUNCE_MS);
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -1109,6 +1223,9 @@
 
     app.innerHTML = `
       ${offlineBanner}
+      <div class="adhan-banner" id="adhan-banner" hidden role="button" aria-label="Play Adhan">
+        <span class="adhan-banner-text">Tap to hear Adhan</span>
+      </div>
       <div class="top-settings">
         <div class="setting-group">
           <label for="method-select">Method</label>
@@ -1164,13 +1281,16 @@
       <div class="reminders-card">
         <p class="qibla-title">Prayer reminders</p>
         ${remindersEnabled ? `
-          <label class="check-label" style="justify-content:center;margin-bottom:12px;">
+          <p class="reminders-status">Notifications: ${notificationPermissionLabel()}</p>
+          <p class="reminders-status">Next reminder: ${nextReminderLabel()}</p>
+          <label class="check-label" style="justify-content:center;margin-bottom:12px;margin-top:12px;">
             <input type="checkbox" id="adhan-toggle" ${playAdhanSound ? 'checked' : ''}>
             Play Adhan sound
           </label>
-          <p class="reminders-note">Notifications at each prayer time. Adhan plays when Salah is open; tap the notification to open and hear Adhan. Works best from your home screen — on iPhone, reminders may be less reliable than native apps.</p>
+          <p class="reminders-note">Locked phone: Android may alert at prayer time; iPhone often needs the app open or tap the notification. Tap <strong>Play Adhan</strong> on the alert to hear the full adhan on iPhone.</p>
           <div class="reminders-actions">
-            <button class="btn secondary" id="disable-reminders">Turn off reminders</button>
+            <button class="btn secondary" id="test-reminder" type="button">Test notification</button>
+            <button class="btn secondary" id="disable-reminders" type="button">Turn off reminders</button>
           </div>
         ` : `
           <p class="reminders-note">Get notified at Fajr, Dhuhr, Asr, Maghrib, and Isha. Add Salah to your home screen for the best experience.</p>
@@ -1189,6 +1309,14 @@
     setupSunriseToggle();
     setupRemindersUI();
     applyStaticCompass();
+    const adhanBanner = document.getElementById('adhan-banner');
+    if (adhanBanner) {
+      adhanBanner.onclick = () => {
+        const text = adhanBanner.querySelector('.adhan-banner-text');
+        const prayer = text?.textContent?.replace(/^Time for /, '').replace(/ — Tap.*/, '') || '';
+        playAdhan('banner-tap', prayer);
+      };
+    }
   }
 
   function setupRemindersUI() {
@@ -1198,12 +1326,15 @@
     const disableBtn = document.getElementById('disable-reminders');
     if (disableBtn) disableBtn.onclick = () => disableReminders();
 
+    const testBtn = document.getElementById('test-reminder');
+    if (testBtn) testBtn.onclick = () => sendTestNotification();
+
     const adhanCb = document.getElementById('adhan-toggle');
     if (adhanCb) {
       adhanCb.onchange = async () => {
         playAdhanSound = adhanCb.checked;
         saveAdhanPref(playAdhanSound);
-        await syncRemindersToSW();
+        await scheduleRemindersToSW();
       };
     }
   }

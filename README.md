@@ -60,17 +60,20 @@ Reminders are scheduled from today's loaded times and update when you refresh lo
 
 - Use **Add to Home Screen** and allow notifications when prompted.
 - Reminders work best from the home-screen icon, not a regular Safari tab.
-- iOS may be less reliable than native prayer apps for background notifications; adhan may not play until you open Salah from the notification.
+- Locked phone: alerts may not fire at exact prayer time; open Salah or check within 15 minutes for a catch-up alert.
+- Full adhan on iPhone: tap **Play Adhan** on the notification or the in-app banner (opening the icon alone may not play audio).
+- Test reminders with **Test notification** in the Prayer reminders section after enabling.
 
 ### Android notes
 
 - Install from Chrome (**Add to Home screen** / **Install app**) for background notifications.
 - Allow notifications when you tap **Enable prayer reminders**.
+- Chrome may schedule alerts with the OS when the phone is locked; disable battery restrictions for Chrome if reminders are missed.
 
 ## How it works
 
 - **Prayer times**: AlAdhan API with `method` and `school` parameters.
-- **Reminders**: a service worker (`sw.js`) schedules today's five prayers in IndexedDB and shows a notification at each time. Adhan audio plays via the open app; closed app gets the system notification sound until you tap to open.
+- **Reminders**: service worker schedules today's five prayers in IndexedDB; Android Chrome may use OS timestamp triggers when supported. Adhan plays via the open app or notification **Play Adhan** action.
 - **Offline**: last successful times (and optional tomorrow Fajr) in localStorage — reused same day to avoid repeat AlAdhan calls until date, prefs, or ~1 km location change; also used when the API is unreachable.
 - **Preferences**: calculation method, Asr school, Sunrise, **Enable prayer reminders**, and **Play Adhan sound** — saved in localStorage.
 
